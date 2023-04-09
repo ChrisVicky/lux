@@ -20,6 +20,12 @@
   </a>
 </div>
 
+
+## Fork Log
+* [2023-04-09] - Temporarily solve problems with `Bilibili` Extractor, adding support for `bangumi` ending with `ep/ss`
+
+---
+
 👾 Lux is a fast and simple video downloader built with Go.
 
 - [Installation](#installation)
