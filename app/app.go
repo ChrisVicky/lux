@@ -17,11 +17,11 @@ import (
 	"github.com/iawia002/lux/utils"
 )
 
-const (
-	// Name is the name of this app.
-	Name    = "lux"
-	version = "v0.17.2"
-)
+// Name is the name of this app.
+const Name = "lux"
+
+// This value will be injected into the corresponding git tag value at build time using `-ldflags`.
+var version = "v0.0.0"
 
 func init() {
 	cli.VersionPrinter = func(c *cli.Context) {
@@ -88,6 +88,11 @@ func New() *cli.App {
 				Name:    "stream-format",
 				Aliases: []string{"f"},
 				Usage:   "Select specific stream to download",
+			},
+			&cli.BoolFlag{
+				Name:    "audio-only",
+				Aliases: []string{"ao"},
+				Usage:   "Download audio only at best quality",
 			},
 			&cli.StringFlag{
 				Name:    "file",
@@ -300,6 +305,7 @@ func download(c *cli.Context, videoURL string) error {
 		Silent:         c.Bool("silent"),
 		InfoOnly:       c.Bool("info"),
 		Stream:         c.String("stream-format"),
+		AudioOnly:      c.Bool("audio-only"),
 		Refer:          c.String("refer"),
 		OutputPath:     c.String("output-path"),
 		OutputName:     c.String("output-name"),

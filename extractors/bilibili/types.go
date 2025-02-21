@@ -12,17 +12,26 @@ type token struct {
 	Data    tokenData `json:"data"`
 }
 
-type bangumiEpData struct {
-	Aid  int    `json:"aid"`
-	Cid  int    `json:"cid"`
-	BVid string `json:"bvid"`
-	ID   int    `json:"id"`
-	EpID int    `json:"ep_id"`
+type Interaction struct {
+	Interaction bool `json:"interaction"`
+}
+
+type EpVideoInfo struct {
+	Aid                           int         `json:"aid"`
+	Bvid                          string      `json:"bvid"`
+	Cid                           int         `json:"cid"`
+	DeliveryBusinessFragmentVideo bool        `json:"delivery_business_fragment_video"`
+	DeliveryFragmentVideo         bool        `json:"delivery_fragment_video"`
+	EpID                          int         `json:"ep_id"`
+	EpStatus                      int         `json:"ep_status"`
+	Interaction                   Interaction `json:"interaction"`
+	LongTitle                     string      `json:"long_title"`
+	Title                         string      `json:"title"`
 }
 
 type bangumiData struct {
-	EpInfo bangumiEpData   `json:"epInfo"`
-	EpList []bangumiEpData `json:"epList"`
+	EpInfo EpVideoInfo   `json:"epInfo"`
+	EpList []EpVideoInfo `json:"epList"`
 }
 
 type videoPagesData struct {
@@ -129,7 +138,7 @@ type subtitleProperty struct {
 
 type subtitleInfo struct {
 	AllowSubmit  bool               `json:"allow_submit"`
-	SubtitleList []subtitleProperty `json:"list"`
+	SubtitleList []subtitleProperty `json:"subtitles"`
 }
 
 type bilibiliWebInterfaceData struct {
@@ -140,4 +149,31 @@ type bilibiliWebInterfaceData struct {
 type bilibiliWebInterface struct {
 	Code int                      `json:"code"`
 	Data bilibiliWebInterfaceData `json:"data"`
+}
+
+type festival struct {
+	VideoSections []struct {
+		Id    int64  `json:"id"`
+		Title string `json:"title"`
+		Type  int    `json:"type"`
+	} `json:"videoSections"`
+	Episodes  []episode `json:"episodes"`
+	VideoInfo struct {
+		Aid   int    `json:"aid"`
+		BVid  string `json:"bvid"`
+		Cid   int    `json:"cid"`
+		Title string `json:"title"`
+		Desc  string `json:"desc"`
+		Pages []struct {
+			Cid       int    `json:"cid"`
+			Duration  int    `json:"duration"`
+			Page      int    `json:"page"`
+			Part      string `json:"part"`
+			Dimension struct {
+				Width  int `json:"width"`
+				Height int `json:"height"`
+				Rotate int `json:"rotate"`
+			} `json:"dimension"`
+		} `json:"pages"`
+	} `json:"videoInfo"`
 }

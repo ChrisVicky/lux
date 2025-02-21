@@ -1,14 +1,15 @@
 package bilibili
 
 import (
-  "encoding/json"
-  "fmt"
-  "strconv"
-  "strings"
-  "time"
+	"encoding/json"
+	"fmt"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
 
-  "github.com/iawia002/lia/array"
-  "github.com/pkg/errors"
+	"github.com/pkg/errors"
 
   "github.com/iawia002/lux/extractors"
   "github.com/iawia002/lux/parser"
@@ -17,7 +18,9 @@ import (
 )
 
 func init() {
-  extractors.Register("bilibili", New())
+	bilibiliExtractor := New()
+	extractors.Register("bilibili", bilibiliExtractor)
+	extractors.Register("b23", bilibiliExtractor)
 }
 
 const (
@@ -92,90 +95,90 @@ aid      int
 }
 
 func extractBangumi(url, html string, extractOption extractors.Options) ([]*extractors.Data, error) {
-  dataString := utils.MatchOneOf(html, `<script\s+id="__NEXT_DATA__"\s+type="application/json"\s*>(.*?)</script\s*>`)[1]
-  epMapString := utils.MatchOneOf(dataString, `"epMap"\s*:\s*(.+?)\s*,\s*"initEpList"`)[1]
-  // ep: Film, ss: 番剧
-  var videoIdString string
-  if tmp := utils.MatchOneOf(dataString, `"videoId"\s*:\s*"ep(\d+)"`); len(tmp) >= 1{
-    videoIdString = tmp[1]
-  }else{
-    videoIdString = utils.MatchOneOf(dataString, `"videoId"\s*:\s*"ss(\d+)"`)[1]
-  }
-  var epMap map[string]json.RawMessage
-  err := json.Unmarshal([]byte(epMapString), &epMap)
-  if err != nil {
-    return nil, errors.WithStack(err)
-  }
-  var data bangumiData
-  for idString, jsonByte := range epMap {
-    var EpInfo bangumiEpData
-    err := json.Unmarshal(jsonByte, &EpInfo)
-    if err != nil {
-      return nil, errors.WithStack(err)
-    }
-    EpID, err := strconv.ParseInt(idString, 10, 0);
-    if err != nil {
-      return nil, errors.WithStack(err)
-    }
-    EpInfo.EpID = int(EpID)
-    if idString == videoIdString {
-      data.EpInfo = EpInfo
-    }
-    data.EpList = append(data.EpList, EpInfo)
-  }
-  if err != nil {
-    return nil, errors.WithStack(err)
-  }
-  if !extractOption.Playlist {
-    aid := data.EpInfo.Aid
-    cid := data.EpInfo.Cid
-    bvid := data.EpInfo.BVid
-    if aid <= 0 || cid <= 0 || bvid == "" {
-      aid = data.EpList[0].Aid
-      cid = data.EpList[0].Cid
-      bvid = data.EpList[0].BVid
-    }
-    options := bilibiliOptions{
-  url:     url,
-html:    html,
-      bangumi: true,
-      aid:     aid,
-      cid:     cid,
-      bvid:    bvid,
-    }
-    return []*extractors.Data{bilibiliDownload(options, extractOption)}, nil
-  }
+	dataString := utils.MatchOneOf(html, `<script\s+id="__NEXT_DATA__"\s+type="application/json"\s*>(.*?)</script\s*>`)[1]
+	epArrayString := utils.MatchOneOf(dataString, `"episode_info"\s*:\s*(.+?)\s*,\s*"season_info"`)[1]
+	fullVideoIdString := utils.MatchOneOf(dataString, `"videoId"\s*:\s*"(ep|ss)(\d+)"`)
+	epSsString := fullVideoIdString[1] // "ep" or "ss"
+	videoIdString := fullVideoIdString[2]
 
-  // handle bangumi playlist
-  needDownloadItems := utils.NeedDownloadList(extractOption.Items, extractOption.ItemStart, extractOption.ItemEnd, len(data.EpList))
-  extractedData := make([]*extractors.Data, len(needDownloadItems))
-  wgp := utils.NewWaitGroupPool(extractOption.ThreadNumber)
-  dataIndex := 0
-  for index, u := range data.EpList {
-    if !array.ItemInArray(index+1, needDownloadItems) {
-      continue
-    }
-    wgp.Add()
-    id := u.EpID
-    if id == 0 {
-      id = u.ID
-    }
-    // html content can't be reused here
-    options := bilibiliOptions{
-      url:     fmt.Sprintf("https://www.bilibili.com/bangumi/play/ep%d", id),
-      bangumi: true,
-      aid:     u.Aid,
-      cid:     u.Cid,
-      bvid:    u.BVid,
-}
-    go func(index int, options bilibiliOptions, extractedData []*extractors.Data) {
-      defer wgp.Done()
-      extractedData[index] = bilibiliDownload(options, extractOption)
-      }(dataIndex, options, extractedData)
-    dataIndex++
-  }
-  wgp.Wait()
-  return extractedData, nil
+	var epArray EpVideoInfo
+	err := json.Unmarshal([]byte(epArrayString), &epArray)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	var data bangumiData
+
+	videoId, err := strconv.ParseInt(videoIdString, 10, 0)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	if epArray.EpID == int(videoId) || (epSsString == "ss" && epArray.Title == "第1话") {
+		data.EpInfo = epArray
+	}
+	data.EpList = append(data.EpList, epArray)
+
+	sort.Slice(data.EpList, func(i, j int) bool {
+		return data.EpList[i].EpID < data.EpList[j].EpID
+	})
+
+	if !extractOption.Playlist {
+		aid := data.EpInfo.Aid
+		cid := data.EpInfo.Cid
+		bvid := data.EpInfo.Bvid
+		titleFormat := data.EpInfo.Title
+		longTitle := data.EpInfo.LongTitle
+		if aid <= 0 || cid <= 0 || bvid == "" {
+			aid = data.EpList[0].Aid
+			cid = data.EpList[0].Cid
+			bvid = data.EpList[0].Bvid
+			titleFormat = data.EpList[0].Title
+			longTitle = data.EpList[0].LongTitle
+		}
+		options := bilibiliOptions{
+			url:     url,
+			html:    html,
+			bangumi: true,
+			aid:     aid,
+			cid:     cid,
+			bvid:    bvid,
+
+			subtitle: fmt.Sprintf("%s %s", titleFormat, longTitle),
+		}
+		return []*extractors.Data{bilibiliDownload(options, extractOption)}, nil
+	}
+
+	// handle bangumi playlist
+	needDownloadItems := utils.NeedDownloadList(extractOption.Items, extractOption.ItemStart, extractOption.ItemEnd, len(data.EpList))
+	extractedData := make([]*extractors.Data, len(needDownloadItems))
+	wgp := utils.NewWaitGroupPool(extractOption.ThreadNumber)
+	dataIndex := 0
+	for index, u := range data.EpList {
+		if !slices.Contains(needDownloadItems, index+1) {
+			continue
+		}
+		wgp.Add()
+		id := u.EpID
+		if id == 0 {
+			id = u.EpID
+		}
+		// html content can't be reused here
+		options := bilibiliOptions{
+			url:     fmt.Sprintf("https://www.bilibili.com/bangumi/play/ep%d", id),
+			bangumi: true,
+			aid:     u.Aid,
+			cid:     u.Cid,
+			bvid:    u.Bvid,
+
+			subtitle: fmt.Sprintf("%s %s", u.Title, u.LongTitle),
+		}
+		go func(index int, options bilibiliOptions, extractedData []*extractors.Data) {
+			defer wgp.Done()
+			extractedData[index] = bilibiliDownload(options, extractOption)
+		}(dataIndex, options, extractedData)
+		dataIndex++
+	}
+	wgp.Wait()
+	return extractedData, nil
 }
 
 func getMultiPageData(html string) (*multiPage, error) {
@@ -191,6 +194,33 @@ func getMultiPageData(html string) (*multiPage, error) {
     return nil, errors.WithStack(err)
   }
   return &data, nil
+}
+
+func extractFestival(url, html string, extractOption extractors.Options) ([]*extractors.Data, error) {
+	matches := utils.MatchAll(html, "<\\s*script[^>]*>\\s*window\\.__INITIAL_STATE__=([\\s\\S]*?);\\s?\\(function[\\s\\S]*?<\\/\\s*script\\s*>")
+	if len(matches) < 1 {
+		return nil, errors.WithStack(extractors.ErrURLParseFailed)
+	}
+	if len(matches[0]) < 2 {
+		return nil, errors.New("could not find video in page")
+	}
+
+	var festivalData festival
+	err := json.Unmarshal([]byte(matches[0][1]), &festivalData)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	options := bilibiliOptions{
+		url:  url,
+		html: html,
+		aid:  festivalData.VideoInfo.Aid,
+		bvid: festivalData.VideoInfo.BVid,
+		cid:  festivalData.VideoInfo.Cid,
+		page: 0,
+	}
+
+	return []*extractors.Data{bilibiliDownload(options, extractOption)}, nil
 }
 
 func extractNormalVideo(url, html string, extractOption extractors.Options) ([]*extractors.Data, error) {
@@ -246,61 +276,61 @@ page: p,
 
 // handle multi episode download
 func multiEpisodeDownload(url, html string, extractOption extractors.Options, pageData *multiPage) ([]*extractors.Data, error) {
-  needDownloadItems := utils.NeedDownloadList(extractOption.Items, extractOption.ItemStart, extractOption.ItemEnd, len(pageData.Sections[0].Episodes))
-  extractedData := make([]*extractors.Data, len(needDownloadItems))
-  wgp := utils.NewWaitGroupPool(extractOption.ThreadNumber)
-  dataIndex := 0
-  for index, u := range pageData.Sections[0].Episodes {
-    if !array.ItemInArray(index+1, needDownloadItems) {
-      continue
-    }
-    wgp.Add()
-    options := bilibiliOptions{
-      url:      url,
-      html:     html,
-      aid:      u.Aid,
-      bvid:     u.BVid,
-      cid:      u.Cid,
-      subtitle: u.Title,
-    }
-    go func(index int, options bilibiliOptions, extractedData []*extractors.Data) {
-      defer wgp.Done()
-      extractedData[index] = bilibiliDownload(options, extractOption)
-      }(dataIndex, options, extractedData)
-    dataIndex++
-  }
-  wgp.Wait()
-  return extractedData, nil
+	needDownloadItems := utils.NeedDownloadList(extractOption.Items, extractOption.ItemStart, extractOption.ItemEnd, len(pageData.Sections[0].Episodes))
+	extractedData := make([]*extractors.Data, len(needDownloadItems))
+	wgp := utils.NewWaitGroupPool(extractOption.ThreadNumber)
+	dataIndex := 0
+	for index, u := range pageData.Sections[0].Episodes {
+		if !slices.Contains(needDownloadItems, index+1) {
+			continue
+		}
+		wgp.Add()
+		options := bilibiliOptions{
+			url:      url,
+			html:     html,
+			aid:      u.Aid,
+			bvid:     u.BVid,
+			cid:      u.Cid,
+			subtitle: fmt.Sprintf("%s P%d", u.Title, index+1),
+		}
+		go func(index int, options bilibiliOptions, extractedData []*extractors.Data) {
+			defer wgp.Done()
+			extractedData[index] = bilibiliDownload(options, extractOption)
+		}(dataIndex, options, extractedData)
+		dataIndex++
+	}
+	wgp.Wait()
+	return extractedData, nil
 }
 
 // handle multi page download
 func multiPageDownload(url, html string, extractOption extractors.Options, pageData *multiPage) ([]*extractors.Data, error) {
-  needDownloadItems := utils.NeedDownloadList(extractOption.Items, extractOption.ItemStart, extractOption.ItemEnd, len(pageData.VideoData.Pages))
-  extractedData := make([]*extractors.Data, len(needDownloadItems))
-  wgp := utils.NewWaitGroupPool(extractOption.ThreadNumber)
-  dataIndex := 0
-  for index, u := range pageData.VideoData.Pages {
-    if !array.ItemInArray(index+1, needDownloadItems) {
-      continue
-    }
-    wgp.Add()
-    options := bilibiliOptions{
-      url:      url,
-      html:     html,
-      aid:      pageData.Aid,
-      bvid:     pageData.BVid,
-      cid:      u.Cid,
-      subtitle: u.Part,
-      page:     u.Page,
-    }
-    go func(index int, options bilibiliOptions, extractedData []*extractors.Data) {
-      defer wgp.Done()
-      extractedData[index] = bilibiliDownload(options, extractOption)
-      }(dataIndex, options, extractedData)
-    dataIndex++
-  }
-  wgp.Wait()
-  return extractedData, nil
+	needDownloadItems := utils.NeedDownloadList(extractOption.Items, extractOption.ItemStart, extractOption.ItemEnd, len(pageData.VideoData.Pages))
+	extractedData := make([]*extractors.Data, len(needDownloadItems))
+	wgp := utils.NewWaitGroupPool(extractOption.ThreadNumber)
+	dataIndex := 0
+	for index, u := range pageData.VideoData.Pages {
+		if !slices.Contains(needDownloadItems, index+1) {
+			continue
+		}
+		wgp.Add()
+		options := bilibiliOptions{
+			url:      url,
+			html:     html,
+			aid:      pageData.Aid,
+			bvid:     pageData.BVid,
+			cid:      u.Cid,
+			subtitle: u.Part,
+			page:     u.Page,
+		}
+		go func(index int, options bilibiliOptions, extractedData []*extractors.Data) {
+			defer wgp.Done()
+			extractedData[index] = bilibiliDownload(options, extractOption)
+		}(dataIndex, options, extractedData)
+		dataIndex++
+	}
+	wgp.Wait()
+	return extractedData, nil
 }
 
 type extractor struct{}
@@ -321,12 +351,15 @@ func (e *extractor) Extract(url string, option extractors.Options) ([]*extractor
   // set thread number to 1 manually to avoid http 412 error
   option.ThreadNumber = 1
 
-  if strings.Contains(url, "bangumi") {
-    // handle bangumi
-    return extractBangumi(url, html, option)
-  }
-  // handle normal video
-  return extractNormalVideo(url, html, option)
+	if strings.Contains(url, "bangumi") {
+		// handle bangumi
+		return extractBangumi(url, html, option)
+	} else if strings.Contains(url, "festival") {
+		return extractFestival(url, html, option)
+	} else {
+		// handle normal video
+		return extractNormalVideo(url, html, option)
+	}
 }
 
 // bilibiliDownload is the download function for a single URL
@@ -446,19 +479,23 @@ Quality: qualityString[dashData.CurQuality],
     }
 }
 
-  // get the title
-  doc, err := parser.GetDoc(html)
-if err != nil {
-    return extractors.EmptyData(options.url, err)
-  }
-title := parser.Title(doc)
-if options.subtitle != "" {
-if extractOption.EpisodeTitleOnly {
-title = fmt.Sprintf("P%d %s", options.page, options.subtitle)
-} else {
-      title = fmt.Sprintf("%s P%d %s", title, options.page, options.subtitle)
-}
-  }
+	// get the title
+	doc, err := parser.GetDoc(html)
+	if err != nil {
+		return extractors.EmptyData(options.url, err)
+	}
+	title := parser.Title(doc)
+	if options.subtitle != "" {
+		pageString := ""
+		if options.page > 0 {
+			pageString = fmt.Sprintf("P%d ", options.page)
+		}
+		if extractOption.EpisodeTitleOnly {
+			title = fmt.Sprintf("%s%s", pageString, options.subtitle)
+		} else {
+			title = fmt.Sprintf("%s %s%s", title, pageString, options.subtitle)
+		}
+	}
 
 return &extractors.Data{
   Site:    "哔哩哔哩 bilibili.com",
@@ -487,24 +524,24 @@ func getExtFromMimeType(mimeType string) string {
 }
 
 func getSubTitleCaptionPart(aid int, cid int) *extractors.CaptionPart {
-  jsonString, err := request.Get(
-    fmt.Sprintf("http://api.bilibili.com/x/web-interface/view?aid=%d&cid=%d", aid, cid), referer, nil,
-)
-if err != nil {
-return nil
-  }
-stu := bilibiliWebInterface{}
-  err = json.Unmarshal([]byte(jsonString), &stu)
-  if err != nil || len(stu.Data.SubtitleInfo.SubtitleList) == 0 {
-    return nil
-}
-  return &extractors.CaptionPart{
-    Part: extractors.Part{
-      URL: stu.Data.SubtitleInfo.SubtitleList[0].SubtitleUrl,
-      Ext: "srt",
-    },
-    Transform: subtitleTransform,
-}
+	jsonString, err := request.Get(
+		fmt.Sprintf("http://api.bilibili.com/x/player/wbi/v2?aid=%d&cid=%d", aid, cid), referer, nil,
+	)
+	if err != nil {
+		return nil
+	}
+	stu := bilibiliWebInterface{}
+	err = json.Unmarshal([]byte(jsonString), &stu)
+	if err != nil || len(stu.Data.SubtitleInfo.SubtitleList) == 0 {
+		return nil
+	}
+	return &extractors.CaptionPart{
+		Part: extractors.Part{
+			URL: fmt.Sprintf("https:%s", stu.Data.SubtitleInfo.SubtitleList[0].SubtitleUrl),
+			Ext: "srt",
+		},
+		Transform: subtitleTransform,
+	}
 }
 
 func subtitleTransform(body []byte) ([]byte, error) {

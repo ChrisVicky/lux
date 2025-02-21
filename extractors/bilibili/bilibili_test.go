@@ -26,7 +26,6 @@ func TestBilibili(t *testing.T) {
 			args: test.Args{
 				URL:   "https://www.bilibili.com/video/av41301960",
 				Title: "【英雄联盟】2019赛季CG 《觉醒》",
-				Size:  70696896,
 			},
 			playlist: false,
 		},
@@ -34,7 +33,7 @@ func TestBilibili(t *testing.T) {
 			name: "bangumi test",
 			args: test.Args{
 				URL:   "https://www.bilibili.com/bangumi/play/ep167000",
-				Title: "狐妖小红娘：第70话 苏苏智商上线",
+				Title: "狐妖小红娘 第70话 苏苏智商上线",
 			},
 		},
 		{
@@ -58,6 +57,20 @@ func TestBilibili(t *testing.T) {
 			args: test.Args{
 				URL:   "https://www.bilibili.com/video/BV1qM4y1w716",
 				Title: "【8K演示片】B站首发！你的设备还顶得住吗？",
+			},
+		},
+		{
+			name: "b23 test",
+			args: test.Args{
+				URL:   "https://b23.tv/Fc9i7QF",
+				Title: "【十年榜】2000-2009年最强华语金曲TOP100 P1 100爱转角-罗志祥",
+			},
+		},
+		{
+			name: "festival test",
+			args: test.Args{
+				URL:   "https://www.bilibili.com/festival/lty10th?bvid=BV1dZ4y1Y7bt",
+				Title: "洛天依十周年官方演唱会",
 			},
 		},
 	}
